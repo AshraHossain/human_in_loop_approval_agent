@@ -1,0 +1,21 @@
+[project]
+name = "hitl-agent-executor"
+version = "0.1.0"
+description = "Human-in-the-loop Approval Agent using LangChain AgentExecutor"
+requires-python = ">=3.10"
+
+dependencies = [
+    "langchain>=0.2.0",
+    "langchain-openai>=0.1.0",
+    # AgentExecutor moved out of langchain.agents in langchain 1.0
+    "langchain-classic>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# CLI entry point: stdout is the output channel, not a logging smell.
+"main.py" = ["T20"]

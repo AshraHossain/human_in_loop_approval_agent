@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant U as User
+    participant A as HITL Agent
+    participant H as Human Approver
+
+    U->>A: Submit request
+    A->>A: Analyze input & detect uncertainty
+
+    alt Uncertain
+        A->>U: HUMAN_APPROVAL_REQUIRED + audit log
+        U->>H: Forward approval request
+        H->>U: Provide clarification
+        U->>A: human_input
+        A->>A: Update context & audit
+        A->>U: RESUMED + updated audit log
+    else Confident
+        A->>U: Completed action + audit log
+    end

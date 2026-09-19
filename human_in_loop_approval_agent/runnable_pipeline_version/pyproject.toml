@@ -1,0 +1,20 @@
+[project]
+name = "hitl-runnable-pipeline"
+version = "0.1.0"
+description = "Human-in-the-loop Approval Agent using LangChain Runnable pipelines"
+requires-python = ">=3.10"
+
+dependencies = [
+    "langchain>=0.2.0",
+    "langchain-openai>=0.1.0",
+    "langchain-core>=0.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# CLI entry point: stdout is the output channel, not a logging smell.
+"pipeline.py" = ["T20"]

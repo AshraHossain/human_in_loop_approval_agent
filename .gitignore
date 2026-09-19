@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv / virtualenvs (each *_version/ has its own .venv)
+# uv.lock IS committed -- reproducible envs, matching the sibling projects
+.venv/
+venv/
+uv.lock.bak
+
+# Secrets
+.env
+.env.*
+
+# graphify: commit the graph and report (rebuilding costs tokens);
+# keep the extraction cache and run bookkeeping local.
+graphify-out/cache/
+graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/.graphify_*
+
+# macOS
+.DS_Store

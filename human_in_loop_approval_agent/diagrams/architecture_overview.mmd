@@ -1,0 +1,8 @@
+flowchart TD
+    IN[User Input] --> DET[Uncertainty Detector]
+    DET -->|Uncertain| PAUSE[Pause & Request Human Approval]
+    PAUSE --> HUMAN[Human Approver]
+    HUMAN --> RESUME[Resume with Validated Context]
+    DET -->|Confident| ACT[Proceed with Action]
+    RESUME --> AUDIT[Audit Trail]
+    ACT --> AUDIT
