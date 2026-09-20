@@ -12,11 +12,15 @@ SCHEMA_KEYS = {
 
 
 def _rec(**kw):
-    base = dict(
-        request_id="req-1", stage="analysis", input_summary="do a thing",
-        policy_checks=["tier:low"], confidence_level="high",
-        risk_assessment="none", human_required=False,
-    )
+    base = {
+        "request_id": "req-1",
+        "stage": "analysis",
+        "input_summary": "do a thing",
+        "policy_checks": ["tier:low"],
+        "confidence_level": "high",
+        "risk_assessment": "none",
+        "human_required": False,
+    }
     base.update(kw)
     return make_audit(**base)
 

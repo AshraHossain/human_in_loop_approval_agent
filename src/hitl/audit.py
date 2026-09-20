@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -35,7 +35,7 @@ def make_audit(
 ) -> dict:
     """Build one audit record. Keyword-only: positional order is a footgun here."""
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "request_id": request_id,
         "stage": stage,
         "input_summary": input_summary,
@@ -56,7 +56,7 @@ def make_audit(
 def append_audit(record: dict, audit_dir: Path) -> Path:
     """Append one record to today's JSONL file. Returns the file written."""
     audit_dir.mkdir(parents=True, exist_ok=True)
-    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
     path = audit_dir / f"{day}.jsonl"
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, default=str) + "\n")

@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from pathlib import Path
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -19,7 +20,7 @@ def test_low_risk_action_runs_without_pausing():
         {
             "request": "comment on P-1 that deploy finished",
             "request_id": "req-1",
-            "action": Action(kind="add_comment", issue_key="P-1", body="done"),
+            "action": asdict(Action(kind="add_comment", issue_key="P-1", body="done")),
         },
         _cfg(),
     )
@@ -35,7 +36,7 @@ def test_high_risk_action_pauses_at_the_gate():
         {
             "request": "move P-1 to Done",
             "request_id": "req-1",
-            "action": Action(kind="transition", issue_key="P-1", target_status="Done"),
+            "action": asdict(Action(kind="transition", issue_key="P-1", target_status="Done")),
         },
         _cfg(),
     )
@@ -50,7 +51,7 @@ def test_denial_executes_nothing():
         {
             "request": "move P-1 to Done",
             "request_id": "req-1",
-            "action": Action(kind="transition", issue_key="P-1", target_status="Done"),
+            "action": asdict(Action(kind="transition", issue_key="P-1", target_status="Done")),
         },
         _cfg(),
     )
@@ -67,7 +68,7 @@ def test_approval_executes_the_action():
         {
             "request": "move P-1 to Done",
             "request_id": "req-1",
-            "action": Action(kind="transition", issue_key="P-1", target_status="Done"),
+            "action": asdict(Action(kind="transition", issue_key="P-1", target_status="Done")),
         },
         _cfg(),
     )
@@ -84,7 +85,7 @@ def test_request_id_is_stable_across_every_stage():
         {
             "request": "move P-1 to Done",
             "request_id": "req-1",
-            "action": Action(kind="transition", issue_key="P-1", target_status="Done"),
+            "action": asdict(Action(kind="transition", issue_key="P-1", target_status="Done")),
         },
         _cfg(),
     )
@@ -100,7 +101,7 @@ def test_execution_failure_does_not_retry():
         {
             "request": "move P-1 to Done",
             "request_id": "req-1",
-            "action": Action(kind="transition", issue_key="P-1", target_status="Done"),
+            "action": asdict(Action(kind="transition", issue_key="P-1", target_status="Done")),
         },
         _cfg(),
     )
@@ -112,7 +113,7 @@ def test_execution_failure_does_not_retry():
 def test_interrupt_survives_a_new_checkpointer_instance(tmp_path: Path):
     """Simulates process death: a fresh SqliteSaver over the same file resumes."""
     db = tmp_path / "cp.sqlite"
-    action = Action(kind="transition", issue_key="P-1", target_status="Done")
+    action = asdict(Action(kind="transition", issue_key="P-1", target_status="Done"))
 
     jira_a = FakeJira(existing={"P-1": "To Do"})
     with checkpointer_for(db) as cp:

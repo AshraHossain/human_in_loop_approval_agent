@@ -27,7 +27,10 @@ from hitl.policy import Action, decide
 
 class State(TypedDict, total=False):
     request: str
-    action: Action
+    # A plain dict, never the Action dataclass: checkpoints outlive this
+    # process and LangGraph blocks deserializing unregistered classes. Keep
+    # what lands on disk to primitives.
+    action: dict
     request_id: str
     human_id: str | None
     decision: str | None
@@ -48,9 +51,13 @@ def checkpointer_for(db_path: Path):
         yield saver
 
 
+def _action(state: State) -> Action:
+    return Action(**state["action"])
+
+
 def build_graph(jira: JiraPort, checkpointer: Any):
     def assess(state: State) -> State:
-        d = decide(state["action"], state["request"])
+        d = decide(_action(state), state["request"])
         audit = make_audit(
             request_id=state["request_id"],
             stage="uncertain" if d.gate else "analysis",
@@ -71,7 +78,7 @@ def build_graph(jira: JiraPort, checkpointer: Any):
             {
                 "request_id": state["request_id"],
                 "request": state["request"],
-                "action": state["action"].kind,
+                "action": state["action"]["kind"],
                 "reason": state["audits"][-1]["risk_assessment"],
             }
         )
@@ -98,7 +105,7 @@ def build_graph(jira: JiraPort, checkpointer: Any):
 
     def execute(state: State) -> State:
         try:
-            result = jira.execute(state["action"])
+            result = jira.execute(_action(state))
         except JiraError as exc:
             # Deliberately no retry: a retry is a new approval cycle.
             return {
@@ -135,7 +142,7 @@ def build_graph(jira: JiraPort, checkpointer: Any):
                     human_decision=state.get("decision"),
                     human_id=state.get("human_id"),
                     final_decision="executed",
-                    actions_taken=[f"{state['action'].kind}:{result}"],
+                    actions_taken=[f"{state['action']['kind']}:{result}"],
                 )
             ],
         }
