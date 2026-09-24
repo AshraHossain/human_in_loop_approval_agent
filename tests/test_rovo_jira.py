@@ -29,6 +29,9 @@ class Spy:
 
 
 def _rovo(**tools):
+    # sleep is a no-op: the retry path is exercised in test_resilience.py, and
+    # backing off for real here would cost seconds per run.
+    tools.setdefault("sleep", lambda _: None)
     return RovoJira(CLOUD, PROJECT, **tools)
 
 

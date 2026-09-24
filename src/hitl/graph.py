@@ -29,7 +29,7 @@ from hitl.identity import (
     require_level,
     verify_identity,
 )
-from hitl.jira import JiraError, JiraPort
+from hitl.jira import JiraError, JiraPort, JiraUnavailable
 from hitl.logging import (
     log_event,
     measure_jira_latency,
@@ -186,6 +186,38 @@ def build_graph(
                 action=state["action"]["kind"],
                 result=result,
             )
+        except JiraUnavailable as exc:
+            # Jira was never reached, so the action was NOT applied. That is a
+            # different fact from "Jira refused it", and conflating the two
+            # would leave an operator guessing whether resubmitting duplicates
+            # the work. Still no automatic retry -- re-running an approved
+            # action is a decision for a human, not for a backoff timer.
+            record_error(f"jira unavailable: {exc}")
+            log_event(
+                "action_deferred",
+                request_id=state["request_id"],
+                action=state["action"]["kind"],
+                error=str(exc),
+            )
+            return {
+                "stage": "deferred",
+                "result": str(exc),
+                "audits": [
+                    make_audit(
+                        request_id=state["request_id"],
+                        stage="completed",
+                        input_summary=state["request"],
+                        policy_checks=["jira-unavailable", "nothing-applied"],
+                        confidence_level="high",
+                        risk_assessment=f"jira unavailable, nothing applied: {exc}",
+                        human_required=False,
+                        human_decision=state.get("decision"),
+                        human_id=state.get("human_id"),
+                        final_decision="deferred",
+                        actions_taken=[],
+                    )
+                ],
+            }
         except JiraError as exc:
             # Deliberately no retry: a retry is a new approval cycle.
             record_error(f"execution failed: {exc}")

@@ -194,6 +194,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"stage: {state.get('stage')}")
     if state.get("result"):
         print(f"result: {state['result']}")
+
+    if state.get("stage") == "deferred":
+        # Distinct from a failure on purpose: nothing was applied, so this one
+        # is safe to submit again once Jira is back.
+        print("  nothing was applied -- safe to resubmit once Jira is reachable")
+        return 4
     return 0
 
 

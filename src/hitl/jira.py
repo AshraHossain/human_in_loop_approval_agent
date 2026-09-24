@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from itertools import count
 from typing import Protocol, runtime_checkable
 
 from hitl.policy import Action
+from hitl.resilience import (
+    CircuitBreaker,
+    CircuitOpen,
+    never_applied,
+    retry,
+    transient,
+)
 
 
 class JiraError(Exception):
     """Any failure performing a Jira action."""
+
+
+class JiraUnavailable(JiraError):
+    """Jira was never reached, so nothing was applied.
+
+    The distinction from a plain `JiraError` is the whole point: a failure
+    means Jira considered the action and refused it, while this means the
+    action never happened and resubmitting it is safe. An ambiguous failure --
+    a timeout, a reset connection -- is deliberately NOT this, because the
+    write may have landed.
+    """
 
 
 @runtime_checkable
@@ -73,6 +92,10 @@ class RovoJira:
         get_transitions: Callable | None = None,
         transition: Callable | None = None,
         add_comment: Callable | None = None,
+        breaker: CircuitBreaker | None = None,
+        attempts: int = 3,
+        backoff: float = 0.5,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cloud_id = cloud_id
         self.project_key = project_key
@@ -80,25 +103,58 @@ class RovoJira:
         self._get_transitions_tool = get_transitions
         self._transition_tool = transition
         self._add_comment_tool = add_comment
+        self._breaker = breaker
+        self._attempts = attempts
+        self._backoff = backoff
+        self._sleep = sleep
+
+    def _call(self, tool: Callable, *, retryable, label: str, **kwargs):
+        return retry(
+            lambda: tool(**kwargs),
+            attempts=self._attempts,
+            backoff=self._backoff,
+            retryable=retryable,
+            sleep=self._sleep,
+            label=label,
+        )
 
     def execute(self, action: Action) -> str:
+        def run() -> str:
+            return self._dispatch(action)
+
         try:
-            if action.kind == "create_issue":
-                return self._exec_create(action)
-            if action.kind == "transition":
-                return self._exec_transition(action)
-            if action.kind == "add_comment":
-                return self._exec_add_comment(action)
-            raise JiraError(f"unsupported action kind: {action.kind}")
+            return self._breaker.call(run) if self._breaker else run()
+        except CircuitOpen as exc:
+            raise JiraUnavailable(str(exc)) from exc
         except JiraError:
             raise
         except Exception as exc:
+            # Only a failure that PROVES nothing was applied may be reported as
+            # safe to resubmit. A timeout or a reset connection might have
+            # landed, so it stays a plain JiraError and spends the approval --
+            # a duplicate Jira write is worse than a re-approval.
+            if never_applied(exc):
+                raise JiraUnavailable(
+                    f"jira unreachable after {self._attempts} attempt(s): {exc}"
+                ) from exc
             raise JiraError(f"jira error: {exc}") from exc
+
+    def _dispatch(self, action: Action) -> str:
+        if action.kind == "create_issue":
+            return self._exec_create(action)
+        if action.kind == "transition":
+            return self._exec_transition(action)
+        if action.kind == "add_comment":
+            return self._exec_add_comment(action)
+        raise JiraError(f"unsupported action kind: {action.kind}")
 
     def _exec_create(self, action: Action) -> str:
         if not self._create_issue_tool:
             raise JiraError("create_issue tool not bound")
-        result = self._create_issue_tool(
+        result = self._call(
+            self._create_issue_tool,
+            retryable=never_applied,
+            label="create_issue",
             cloudId=self.cloud_id,
             projectKey=self.project_key,
             issueTypeName="Task",
@@ -112,8 +168,13 @@ class RovoJira:
         if not self._get_transitions_tool or not self._transition_tool:
             raise JiraError("transition tools not bound")
 
-        transitions = self._get_transitions_tool(
-            cloudId=self.cloud_id, issueIdOrKey=action.issue_key
+        # A read: no side effect, so it may be retried on anything transient.
+        transitions = self._call(
+            self._get_transitions_tool,
+            retryable=transient,
+            label="get_transitions",
+            cloudId=self.cloud_id,
+            issueIdOrKey=action.issue_key,
         )
         trans_dict = (
             transitions.get("transitions", [])
@@ -133,7 +194,10 @@ class RovoJira:
                 f"from {action.issue_key}"
             )
 
-        self._transition_tool(
+        self._call(
+            self._transition_tool,
+            retryable=never_applied,
+            label="transition",
             cloudId=self.cloud_id,
             issueIdOrKey=action.issue_key,
             transition={"id": trans_id},
@@ -143,7 +207,10 @@ class RovoJira:
     def _exec_add_comment(self, action: Action) -> str:
         if not self._add_comment_tool:
             raise JiraError("add_comment tool not bound")
-        self._add_comment_tool(
+        self._call(
+            self._add_comment_tool,
+            retryable=never_applied,
+            label="add_comment",
             cloudId=self.cloud_id,
             issueIdOrKey=action.issue_key,
             commentBody=action.body,
