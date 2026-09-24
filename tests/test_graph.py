@@ -1,12 +1,11 @@
 from dataclasses import asdict
 from pathlib import Path
 
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command
-
 from hitl.graph import build_graph, checkpointer_for
 from hitl.jira import FakeJira
 from hitl.policy import Action
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 
 def _cfg(rid="req-1"):

@@ -1,5 +1,4 @@
 import pytest
-
 from hitl.jira import FakeJira, JiraError, JiraPort
 from hitl.policy import Action
 
@@ -27,6 +26,11 @@ def test_transition_unknown_issue_raises():
     j = FakeJira()
     with pytest.raises(JiraError, match="unknown issue"):
         j.execute(Action(kind="transition", issue_key="NOPE-9", target_status="Done"))
+
+
+def test_comment_on_unknown_issue_raises():
+    with pytest.raises(JiraError, match="unknown issue P-9"):
+        FakeJira().execute(Action(kind="add_comment", issue_key="P-9", body="hi"))
 
 
 def test_unsupported_action_raises():

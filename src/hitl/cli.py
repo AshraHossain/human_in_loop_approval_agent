@@ -4,6 +4,11 @@
     hitl approve <request_id> --as <who>   -> resumes from the checkpoint
     hitl deny    <request_id> --as <who>
     hitl audit   <request_id>
+    hitl users   add <who> --level lead    -> who may approve, and up to what tier
+
+Approvers come from `<home>/identities.json`. No file means no approvers, so a
+fresh install approves nothing until someone is added -- the safe direction to
+fail in.
 
 `--seed` exists so the FakeJira backing this CLI has issues to act on until
 `RovoJira` is bound (Task 7).
@@ -20,10 +25,13 @@ from pathlib import Path
 
 from langgraph.types import Command
 
-from hitl.audit import append_audit, new_request_id
+from hitl.audit import append_audit, new_request_id, verify_chain
 from hitl.graph import build_graph, checkpointer_for
+from hitl.identity import FileIdentityProvider
 from hitl.jira import FakeJira
 from hitl.policy import Action
+
+LEVELS = ("junior", "senior", "lead")
 
 _TRANSITION = re.compile(r"^transition\s+(\S+)\s+to\s+(.+)$", re.IGNORECASE)
 _COMMENT = re.compile(r"^comment\s+(\S+)\s+(.+)$", re.IGNORECASE)
@@ -89,9 +97,53 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser("audit")
     a.add_argument("request_id")
 
+    sub.add_parser("verify")
+
+    u = sub.add_parser("users")
+    usub = u.add_subparsers(dest="users_cmd", required=True)
+    ua = usub.add_parser("add")
+    ua.add_argument("user_id")
+    ua.add_argument("--level", required=True, choices=LEVELS)
+    ur = usub.add_parser("rm")
+    ur.add_argument("user_id")
+    usub.add_parser("list")
+
     args = p.parse_args(argv)
     home: Path = args.home
     db = home / "checkpoints.sqlite"
+    identities_path = home / "identities.json"
+
+    if args.cmd == "users":
+        users = (
+            json.loads(identities_path.read_text(encoding="utf-8"))
+            if identities_path.exists()
+            else {}
+        )
+        if args.users_cmd == "list":
+            for user_id, level in sorted(users.items()):
+                print(f"{user_id}: {level}")
+            return 0
+        if args.users_cmd == "add":
+            users[args.user_id] = args.level
+        elif args.user_id not in users:
+            print(f"no such user: {args.user_id}")
+            return 1
+        else:
+            del users[args.user_id]
+        identities_path.parent.mkdir(parents=True, exist_ok=True)
+        identities_path.write_text(json.dumps(users, indent=2) + "\n", encoding="utf-8")
+        print(f"{args.users_cmd}: {args.user_id}")
+        return 0
+
+    if args.cmd == "verify":
+        problems = verify_chain(home / "audit")
+        if problems:
+            print(f"AUDIT TRAIL COMPROMISED ({len(problems)} problem(s))")
+            for problem in problems:
+                print(f"  {problem}")
+            return 1
+        print("audit trail intact")
+        return 0
 
     if args.cmd == "audit":
         found = []
@@ -110,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = {"configurable": {"thread_id": cfg_id}}
 
     with checkpointer_for(db) as cp:
-        app = build_graph(jira, cp)
+        app = build_graph(jira, cp, FileIdentityProvider(identities_path))
         if args.cmd == "submit":
             try:
                 action = parse_action(args.request)
@@ -133,6 +185,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  request_id {cfg_id}")
         print(f"  approve with: hitl approve {cfg_id} --as <your-id>")
         return 0
+
+    if state.get("refusal"):
+        print(f"REJECTED: {state['refusal']}")
+        print(f"  request_id {cfg_id} was denied and is closed")
+        return 3
 
     print(f"stage: {state.get('stage')}")
     if state.get("result"):

@@ -1,5 +1,4 @@
 import pytest
-
 from hitl.policy import Action, decide, estimate_confidence, risk_tier
 
 
@@ -64,3 +63,25 @@ def test_decision_carries_policy_checks():
     d = decide(Action(kind="create_issue", body="x"), "create a bug for the crash")
     assert any("tier:" in c for c in d.checks)
     assert any("confidence:" in c for c in d.checks)
+
+
+def test_a_gated_tier_and_an_ambiguous_request_reports_both_reasons():
+    # Both gates fire at once. The reviewer needs to see both, because
+    # resolving only the ambiguity would not clear the tier gate.
+    action = Action(kind="transition", issue_key="P-1", target_status="Done")
+    d = decide(action, "maybe move PROJ-1 to Done, not sure")
+
+    assert d.tier == "high"
+    assert d.confidence == "low"
+    assert d.gate is True
+    assert "requires approval" in d.reason
+    assert "ambiguous" in d.reason
+
+
+def test_medium_tier_and_ambiguous_request_also_reports_both():
+    d = decide(Action(kind="create_issue", body="x"), "maybe create something, unclear")
+
+    assert d.tier == "medium"
+    assert d.confidence == "low"
+    assert "requires approval" in d.reason
+    assert "ambiguous" in d.reason
