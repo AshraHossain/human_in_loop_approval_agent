@@ -29,7 +29,7 @@ from hitl.identity import (
     require_level,
     verify_identity,
 )
-from hitl.jira import JiraError, JiraPort, JiraUnavailable
+from hitl.jira import JiraError, JiraPort, JiraUnavailableError
 from hitl.logging import (
     log_event,
     measure_jira_latency,
@@ -186,7 +186,7 @@ def build_graph(
                 action=state["action"]["kind"],
                 result=result,
             )
-        except JiraUnavailable as exc:
+        except JiraUnavailableError as exc:
             # Jira was never reached, so the action was NOT applied. That is a
             # different fact from "Jira refused it", and conflating the two
             # would leave an operator guessing whether resubmitting duplicates

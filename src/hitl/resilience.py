@@ -43,7 +43,7 @@ class TransientError(Exception):
     """
 
 
-class CircuitOpen(Exception):
+class CircuitOpenError(Exception):
     """The breaker is open, so the call was never attempted."""
 
 
@@ -75,7 +75,7 @@ def never_applied(exc: BaseException) -> bool:
 
 def transient(exc: BaseException) -> bool:
     """True for infrastructure failures, as opposed to Jira's own answer."""
-    return isinstance(exc, NEVER_APPLIED) or isinstance(exc, TRANSPORT)
+    return isinstance(exc, (*NEVER_APPLIED, *TRANSPORT))
 
 
 def ambiguous(exc: BaseException) -> bool:
@@ -154,7 +154,7 @@ class CircuitBreaker:
 
     def call(self, fn: Callable[[], T]) -> T:
         if self.state == "open":
-            raise CircuitOpen(
+            raise CircuitOpenError(
                 f"circuit open after {self.failures} consecutive failures; "
                 f"retrying in {self.recovery - (self.clock() - self.opened_at):.0f}s"
             )

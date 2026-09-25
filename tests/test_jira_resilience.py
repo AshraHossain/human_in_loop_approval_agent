@@ -11,9 +11,9 @@ from dataclasses import asdict
 import pytest
 from hitl.cli import main
 from hitl.graph import build_graph
-from hitl.jira import JiraError, JiraUnavailable, RovoJira
+from hitl.jira import JiraError, JiraUnavailableError, RovoJira
 from hitl.policy import Action
-from hitl.resilience import CircuitBreaker, CircuitOpen, TransientError
+from hitl.resilience import CircuitBreaker, CircuitOpenError, TransientError
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
@@ -81,12 +81,12 @@ def test_an_ambiguous_transition_failure_is_attempted_exactly_once():
 
 @pytest.mark.parametrize("exc", [TimeoutError("timed out"), ConnectionResetError("reset")])
 def test_an_ambiguous_failure_is_not_reported_as_safe_to_resubmit(exc):
-    """`JiraUnavailable` means "nothing was applied". A timeout cannot promise
+    """`JiraUnavailableError` means "nothing was applied". A timeout cannot promise
     that, so it must stay an ordinary failure."""
     with pytest.raises(JiraError) as excinfo:
         _rovo(create_issue=Flaky(fail_times=99, raises=exc)).execute(CREATE)
 
-    assert not isinstance(excinfo.value, JiraUnavailable)
+    assert not isinstance(excinfo.value, JiraUnavailableError)
 
 
 # --- retries that ARE safe ------------------------------------------------
@@ -112,7 +112,7 @@ def test_a_read_is_retried_even_on_an_ambiguous_failure():
 
 
 def test_exhausting_retries_on_a_never_applied_failure_is_safe_to_resubmit():
-    with pytest.raises(JiraUnavailable, match="jira unreachable after 3 attempt"):
+    with pytest.raises(JiraUnavailableError, match="jira unreachable after 3 attempt"):
         _rovo(create_issue=Flaky(fail_times=99), attempts=3).execute(CREATE)
 
 
@@ -138,12 +138,12 @@ def test_the_breaker_opens_and_then_refuses_to_call_jira():
     jira = _rovo(create_issue=create, attempts=1, breaker=breaker)
 
     for _ in range(2):
-        with pytest.raises(JiraUnavailable):
+        with pytest.raises(JiraUnavailableError):
             jira.execute(CREATE)
     assert breaker.state == "open"
 
     calls_before = create.calls
-    with pytest.raises(JiraUnavailable, match="circuit open"):
+    with pytest.raises(JiraUnavailableError, match="circuit open"):
         jira.execute(CREATE)
     assert create.calls == calls_before, "an open circuit must not reach the backend"
 
@@ -153,12 +153,12 @@ def test_an_open_circuit_reports_as_safe_to_resubmit():
     breaker = CircuitBreaker(threshold=1, recovery=30.0)
     jira = _rovo(create_issue=Flaky(fail_times=99), attempts=1, breaker=breaker)
 
-    with pytest.raises(JiraUnavailable):
+    with pytest.raises(JiraUnavailableError):
         jira.execute(CREATE)
-    with pytest.raises(JiraUnavailable) as excinfo:
+    with pytest.raises(JiraUnavailableError) as excinfo:
         jira.execute(CREATE)
 
-    assert isinstance(excinfo.value.__cause__, CircuitOpen)
+    assert isinstance(excinfo.value.__cause__, CircuitOpenError)
 
 
 def test_jira_rejecting_an_action_does_not_open_the_breaker():
@@ -187,7 +187,7 @@ def test_a_success_after_recovery_closes_the_breaker():
     create = Flaky(fail_times=1, returns={"key": "KAN-7"})
     jira = _rovo(create_issue=create, attempts=1, breaker=breaker)
 
-    with pytest.raises(JiraUnavailable):
+    with pytest.raises(JiraUnavailableError):
         jira.execute(CREATE)
     now[0] = 10.0
 
@@ -210,7 +210,7 @@ class Unavailable:
 
     def execute(self, action):
         self.calls.append(action)
-        raise JiraUnavailable("jira unreachable after 3 attempt(s): refused")
+        raise JiraUnavailableError("jira unreachable after 3 attempt(s): refused")
 
 
 def _approve(jira):

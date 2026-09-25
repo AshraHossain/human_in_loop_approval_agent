@@ -10,7 +10,7 @@ from typing import Protocol, runtime_checkable
 from hitl.policy import Action
 from hitl.resilience import (
     CircuitBreaker,
-    CircuitOpen,
+    CircuitOpenError,
     never_applied,
     retry,
     transient,
@@ -21,7 +21,7 @@ class JiraError(Exception):
     """Any failure performing a Jira action."""
 
 
-class JiraUnavailable(JiraError):
+class JiraUnavailableError(JiraError):
     """Jira was never reached, so nothing was applied.
 
     The distinction from a plain `JiraError` is the whole point: a failure
@@ -124,8 +124,8 @@ class RovoJira:
 
         try:
             return self._breaker.call(run) if self._breaker else run()
-        except CircuitOpen as exc:
-            raise JiraUnavailable(str(exc)) from exc
+        except CircuitOpenError as exc:
+            raise JiraUnavailableError(str(exc)) from exc
         except JiraError:
             raise
         except Exception as exc:
@@ -134,7 +134,7 @@ class RovoJira:
             # landed, so it stays a plain JiraError and spends the approval --
             # a duplicate Jira write is worse than a re-approval.
             if never_applied(exc):
-                raise JiraUnavailable(
+                raise JiraUnavailableError(
                     f"jira unreachable after {self._attempts} attempt(s): {exc}"
                 ) from exc
             raise JiraError(f"jira error: {exc}") from exc

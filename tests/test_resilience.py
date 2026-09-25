@@ -12,7 +12,7 @@ import pytest
 from hitl.resilience import (
     NEVER_APPLIED,
     CircuitBreaker,
-    CircuitOpen,
+    CircuitOpenError,
     TransientError,
     ambiguous,
     never_applied,
@@ -220,7 +220,7 @@ def test_an_open_breaker_fails_fast_without_calling():
     _trip(b, 1)
 
     fn = Flaky(fail_times=0)
-    with pytest.raises(CircuitOpen, match="circuit open"):
+    with pytest.raises(CircuitOpenError, match="circuit open"):
         b.call(fn)
     assert fn.calls == 0, "the whole point is not to call a backend that is down"
 
@@ -318,7 +318,7 @@ def test_the_open_message_says_how_long_is_left():
     _trip(b, 1)
     clock.advance(10.0)
 
-    with pytest.raises(CircuitOpen, match="retrying in 20s"):
+    with pytest.raises(CircuitOpenError, match="retrying in 20s"):
         b.call(lambda: "ok")
 
 
