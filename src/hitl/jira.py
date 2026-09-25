@@ -108,6 +108,23 @@ class RovoJira:
         self._backoff = backoff
         self._sleep = sleep
 
+    @classmethod
+    def from_config(cls, config, **tools) -> RovoJira:
+        """Build from a `Config`, so the retry and breaker knobs are the ones
+        an operator set rather than the ones that happen to be in the source."""
+        if not config.jira_cloud_id:
+            raise JiraError("jira_cloud_id is not configured")
+        return cls(
+            config.jira_cloud_id,
+            config.jira_project_key,
+            attempts=config.attempts,
+            backoff=config.backoff,
+            breaker=CircuitBreaker(
+                threshold=config.breaker_threshold, recovery=config.breaker_recovery
+            ),
+            **tools,
+        )
+
     def _call(self, tool: Callable, *, retryable, label: str, **kwargs):
         return retry(
             lambda: tool(**kwargs),

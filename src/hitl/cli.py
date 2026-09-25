@@ -5,10 +5,15 @@
     hitl deny    <request_id> --as <who>
     hitl audit   <request_id>
     hitl users   add <who> --level lead    -> who may approve, and up to what tier
+    hitl config                            -> print the resolved configuration
 
 Approvers come from `<home>/identities.json`. No file means no approvers, so a
 fresh install approves nothing until someone is added -- the safe direction to
 fail in.
+
+Settings come from `<home>/config.toml`, the environment (`HITL_*`) and a
+`.env` file; see config.example.toml. `--home`, `--profile` and `--config` are
+global, so they go before the subcommand: `hitl --profile prod submit ...`.
 
 `--seed` exists so the FakeJira backing this CLI has issues to act on until
 `RovoJira` is bound (Task 7).
@@ -26,9 +31,11 @@ from pathlib import Path
 from langgraph.types import Command
 
 from hitl.audit import append_audit, new_request_id, verify_chain
+from hitl.config import ConfigError, load_config
 from hitl.graph import build_graph, checkpointer_for
 from hitl.identity import FileIdentityProvider
 from hitl.jira import FakeJira
+from hitl.logging import setup_logging
 from hitl.policy import Action
 
 LEVELS = ("junior", "senior", "lead")
@@ -81,7 +88,12 @@ def _emit(state: dict, home: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="hitl")
-    p.add_argument("--home", default=".hitl", type=Path)
+    # No argparse defaults on these three: a flag left off must fall through
+    # to the environment and the config file, not overwrite them with its own
+    # idea of a default.
+    p.add_argument("--home", type=Path)
+    p.add_argument("--profile")
+    p.add_argument("--config", type=Path, help="TOML config file")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("submit")
@@ -108,10 +120,32 @@ def main(argv: list[str] | None = None) -> int:
     ur.add_argument("user_id")
     usub.add_parser("list")
 
+    c = sub.add_parser("config", help="print the resolved configuration")
+    c.add_argument("--json", action="store_true")
+
     args = p.parse_args(argv)
-    home: Path = args.home
-    db = home / "checkpoints.sqlite"
-    identities_path = home / "identities.json"
+
+    try:
+        cfg = load_config(path=args.config, home=args.home, profile=args.profile)
+    except ConfigError as exc:
+        # Fail at startup with every problem at once, rather than halfway
+        # through a request with one of them.
+        print(str(exc))
+        return 2
+
+    setup_logging("hitl", level=cfg.log_level)
+    home = cfg.home
+    db = cfg.checkpoint_db
+    identities_path = cfg.identities_path
+
+    if args.cmd == "config":
+        resolved = cfg.redacted()
+        if args.json:
+            print(json.dumps(resolved, indent=2, sort_keys=True))
+        else:
+            for key, value in sorted(resolved.items()):
+                print(f"{key} = {value!r}")
+        return 0
 
     if args.cmd == "users":
         users = (
@@ -136,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "verify":
-        problems = verify_chain(home / "audit")
+        problems = verify_chain(cfg.audit_dir)
         if problems:
             print(f"AUDIT TRAIL COMPROMISED ({len(problems)} problem(s))")
             for problem in problems:

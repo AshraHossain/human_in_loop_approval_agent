@@ -41,16 +41,19 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_obj, ensure_ascii=False, default=str)
 
 
-def setup_logging(name: str | None = None) -> logging.Logger:
-    """Configure JSON logging."""
-    logger = logging.getLogger(name or __name__)
-    if logger.handlers:
-        return logger
+def setup_logging(name: str | None = None, level: str = "INFO") -> logging.Logger:
+    """Configure JSON logging.
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    Safe to call again: the handler is added once, but the level is applied
+    every time, so a later call with a different level takes effect instead
+    of being silently ignored.
+    """
+    logger = logging.getLogger(name or __name__)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(JSONFormatter())
+        logger.addHandler(handler)
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     return logger
 
 

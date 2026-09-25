@@ -1,0 +1,58 @@
+# Example HITL configuration.
+#
+# Copy to <home>/config.toml (default: .hitl/config.toml), or point at it with
+# `hitl --config path/to/config.toml` or HITL_CONFIG.
+#
+# Precedence, highest first:
+#   1. a CLI flag          hitl --profile prod
+#   2. the environment     HITL_ATTEMPTS=5
+#   3. a .env file         dev convenience only
+#   4. [profiles.<name>]
+#   5. [default]
+#   6. the built-in default
+#
+# `hitl config` prints what actually resolved, with secrets masked.
+#
+# Secrets are NOT accepted here -- a token in this file is a token in git.
+# Set HITL_SIEM_TOKEN in the environment (or a .env file) instead.
+
+# Which profile to use when neither --profile nor HITL_PROFILE says.
+profile = "dev"
+
+
+[default]
+log_level = "INFO"
+
+# Retry. Note that only reads, and mutations that provably never reached
+# Jira, are retried at all -- see resilience.py.
+attempts = 3
+backoff = 0.5
+
+# Circuit breaker: stop calling Jira after this many consecutive outages,
+# then probe again after `breaker_recovery` seconds.
+breaker_threshold = 5
+breaker_recovery = 30.0
+
+siem_batch_size = 100
+
+jira_project_key = "KAN"
+# jira_cloud_id = "651073bf-..."   # required before a live Jira can be bound
+
+
+[profiles.dev]
+log_level = "DEBUG"
+
+
+[profiles.staging]
+attempts = 4
+siem_url = "https://siem.staging.example.com/events"
+
+
+[profiles.prod]
+# A production Jira is worth waiting longer for, and worth giving up on
+# more slowly, than a dev one.
+attempts = 5
+backoff = 1.0
+breaker_threshold = 10
+breaker_recovery = 60.0
+siem_url = "https://siem.example.com/events"

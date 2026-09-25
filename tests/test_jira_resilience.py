@@ -277,3 +277,42 @@ def test_the_cli_exits_four_when_jira_is_unavailable(tmp_path, capsys, monkeypat
 
     assert rc == 4, "a distinct exit code so a script can tell outage from rejection"
     assert "safe to resubmit" in capsys.readouterr().out
+
+
+# --- built from config ----------------------------------------------------
+
+
+def test_from_config_takes_its_knobs_from_the_config():
+    from hitl.config import Config
+
+    cfg = Config(
+        jira_cloud_id="cloud-9",
+        jira_project_key="OPS",
+        attempts=7,
+        backoff=1.5,
+        breaker_threshold=9,
+        breaker_recovery=45.0,
+    )
+    jira = RovoJira.from_config(cfg, create_issue=Flaky(returns={"key": "OPS-1"}))
+
+    assert (jira.cloud_id, jira.project_key) == ("cloud-9", "OPS")
+    assert (jira._attempts, jira._backoff) == (7, 1.5)
+    assert (jira._breaker.threshold, jira._breaker.recovery) == (9, 45.0)
+
+
+def test_from_config_produces_a_working_client():
+    from hitl.config import Config
+
+    jira = RovoJira.from_config(
+        Config(jira_cloud_id="cloud-9"), create_issue=Flaky(returns={"key": "KAN-1"})
+    )
+    assert jira.execute(CREATE) == "KAN-1"
+
+
+def test_from_config_refuses_to_build_without_a_cloud_id():
+    """Defaulting the cloud id would point writes at nothing, or worse, at
+    whatever site happened to answer."""
+    from hitl.config import Config
+
+    with pytest.raises(JiraError, match="jira_cloud_id is not configured"):
+        RovoJira.from_config(Config())
