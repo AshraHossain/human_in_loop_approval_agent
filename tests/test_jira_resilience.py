@@ -272,7 +272,7 @@ def test_the_cli_exits_four_when_jira_is_unavailable(tmp_path, capsys, monkeypat
     out = capsys.readouterr().out
     rid = next(ln.split()[-1] for ln in out.splitlines() if "request_id" in ln)
 
-    monkeypatch.setattr("hitl.cli._jira", lambda seed: Unavailable())
+    monkeypatch.setattr("hitl.cli._jira", lambda _seed: Unavailable())
     rc = main(["--home", str(tmp_path), "approve", rid, "--as", "ash"])
 
     assert rc == 4, "a distinct exit code so a script can tell outage from rejection"

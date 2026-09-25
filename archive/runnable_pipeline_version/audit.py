@@ -1,5 +1,5 @@
-import uuid
 import datetime
+import uuid
 
 
 def make_audit(stage: str, confidence: str, risk: str, human_required: bool, human_response=None):
