@@ -39,7 +39,15 @@ DEFAULT_PROFILE = "dev"
 LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 # Never read from a TOML file, only from the environment.
-SECRET_FIELDS = frozenset({"siem_token"})
+SECRET_FIELDS = frozenset(
+    {
+        "siem_token",
+        "slack_webhook_url",
+        "smtp_host",
+        "smtp_from",
+        "webhook_url",
+    }
+)
 
 
 class ConfigError(Exception):
@@ -68,6 +76,14 @@ class Config:
     # Live Jira.
     jira_cloud_id: str | None = None
     jira_project_key: str = "KAN"
+
+    # Notifications.
+    slack_webhook_url: str | None = None
+    smtp_host: str | None = None
+    smtp_from: str | None = None
+    webhook_url: str | None = None
+    # Approval levels for each notifier (comma-separated: junior,senior,lead)
+    notify_levels: str = "senior,lead"
 
     def __post_init__(self) -> None:
         # `load_config` coerces, but nothing stops a caller from writing
@@ -115,6 +131,11 @@ _COERCE = {
     "siem_batch_size": int,
     "jira_cloud_id": str,
     "jira_project_key": str,
+    "slack_webhook_url": str,
+    "smtp_host": str,
+    "smtp_from": str,
+    "webhook_url": str,
+    "notify_levels": str,
 }
 
 FIELD_NAMES = frozenset(_COERCE)

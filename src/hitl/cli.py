@@ -37,6 +37,7 @@ from hitl.health import check_health, defer_signals
 from hitl.identity import FileIdentityProvider
 from hitl.jira import FakeJira
 from hitl.logging import setup_logging
+from hitl.notifiers import EmailNotifier, NotifierChain, SlackNotifier, WebhookNotifier
 from hitl.policy import Action
 from hitl.server import serve
 
@@ -66,6 +67,33 @@ def _jira(seed: list[str] | None) -> FakeJira:
         key, _, status = item.partition("=")
         existing[key] = status or "To Do"
     return FakeJira(existing=existing)
+
+
+def _build_notifiers(cfg) -> NotifierChain | None:
+    """Build notifier chain from config.
+
+    Returns None if no notifiers are configured. Notifiers are keyed by
+    approval level (JUNIOR, SENIOR, LEAD) from notify_levels config.
+    """
+    notifiers: dict[str, list] = {}
+    levels = [lv.strip().upper() for lv in cfg.notify_levels.split(",")]
+
+    if cfg.slack_webhook_url:
+        notifier = SlackNotifier(url=cfg.slack_webhook_url)
+        for level in levels:
+            notifiers.setdefault(level, []).append(notifier)
+
+    if cfg.smtp_host and cfg.smtp_from:
+        notifier = EmailNotifier(smtp_host=cfg.smtp_host, from_addr=cfg.smtp_from)
+        for level in levels:
+            notifiers.setdefault(level, []).append(notifier)
+
+    if cfg.webhook_url:
+        notifier = WebhookNotifier(url=cfg.webhook_url)
+        for level in levels:
+            notifiers.setdefault(level, []).append(notifier)
+
+    return NotifierChain(notifiers) if notifiers else None
 
 
 def _emit(state: dict, home: Path) -> None:
@@ -236,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     # with no trail, which is the one outcome this system exists to prevent.
     with defer_signals():
         with checkpointer_for(db) as cp:
-            app = build_graph(jira, cp, FileIdentityProvider(identities_path))
+            notifiers = _build_notifiers(cfg)
+            app = build_graph(jira, cp, FileIdentityProvider(identities_path), notifiers)
             if args.cmd == "submit":
                 state = app.invoke(
                     {

@@ -36,6 +36,7 @@ from hitl.logging import (
     record_approval,
     record_error,
 )
+from hitl.notifiers import NotifierChain
 from hitl.policy import Action, decide
 
 
@@ -75,13 +76,19 @@ def _action(state: State) -> Action:
 
 
 def build_graph(
-    jira: JiraPort, checkpointer: Any, identities: IdentityProvider | None = None
+    jira: JiraPort,
+    checkpointer: Any,
+    identities: IdentityProvider | None = None,
+    notifiers: NotifierChain | None = None,
 ):
     """Compile the approval graph.
 
     `identities` is the RBAC boundary. Passing None disables identity checks
     entirely, which is only appropriate for tests of the graph's own mechanics
     -- the CLI always supplies a provider.
+
+    `notifiers` sends approval requests to Slack, email, webhooks. Passing None
+    disables notifications (approvers are only reached by polling).
     """
 
     def assess(state: State) -> State:
@@ -116,6 +123,22 @@ def build_graph(
             action=state["action"]["kind"],
             reason=state["audits"][-1]["risk_assessment"],
         )
+
+        # Emit notifications before interrupting, so we reach approvers proactively.
+        if notifiers is not None:
+            try:
+                approval_link = f"hitl approve {state['request_id']} --as YOUR_ID"
+                notifiers.notify(
+                    level=state.get("tier", "high"),
+                    approver_id="approvers",  # broadcast to the level
+                    action_summary=f"{state['action']['kind']}: {state['request'][:50]}",
+                    approval_link=approval_link,
+                )
+                log_event("notification_sent", request_id=state["request_id"])
+            except Exception as exc:
+                # Notification failure does not block approval.
+                log_event("notification_send_failed", error=str(exc), level="warning")
+
         answer = interrupt(
             {
                 "request_id": state["request_id"],
