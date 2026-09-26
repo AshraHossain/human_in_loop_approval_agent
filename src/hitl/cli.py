@@ -31,6 +31,7 @@ from pathlib import Path
 from langgraph.types import Command
 
 from hitl.audit import append_audit, new_request_id, verify_chain
+from hitl.backup import archive, backup, restore
 from hitl.config import ConfigError, load_config
 from hitl.graph import build_graph, checkpointer_for
 from hitl.health import check_health, defer_signals
@@ -165,6 +166,23 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8080)
 
+    bk = sub.add_parser("backup", help="backup audit trail to timestamped directory")
+    bk.add_argument(
+        "--to", type=Path, required=True, help="backup root directory (creates YYYYMMDD_HHMMSS subdirs)"
+    )
+
+    rs = sub.add_parser("restore", help="restore audit trail from backup")
+    rs.add_argument("--from", dest="from_dir", type=Path, required=True, help="backup directory")
+    rs.add_argument("--verify", action="store_true", default=True, help="verify chain after restore")
+
+    ar = sub.add_parser("archive", help="move old audit records to cold storage")
+    ar.add_argument(
+        "--to", type=Path, required=True, help="archive directory"
+    )
+    ar.add_argument(
+        "--older-than", type=int, default=180, help="days old before archiving (default 180)"
+    )
+
     args = p.parse_args(argv)
 
     try:
@@ -223,6 +241,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         return serve(cfg, host=args.host, port=args.port)
+
+    if args.cmd == "backup":
+        backup_dir = backup(cfg.audit_dir, args.to)
+        print(f"backed up to {backup_dir}")
+        return 0
+
+    if args.cmd == "restore":
+        count = restore(args.from_dir, cfg.audit_dir, verify=args.verify)
+        print(f"restored {count} file(s)")
+        return 0
+
+    if args.cmd == "archive":
+        count = archive(cfg.audit_dir, args.to, older_than_days=args.older_than)
+        print(f"archived {count} file(s)")
+        return 0
 
     if args.cmd == "verify":
         problems = verify_chain(cfg.audit_dir)
