@@ -33,10 +33,12 @@ from langgraph.types import Command
 from hitl.audit import append_audit, new_request_id, verify_chain
 from hitl.config import ConfigError, load_config
 from hitl.graph import build_graph, checkpointer_for
+from hitl.health import check_health, defer_signals
 from hitl.identity import FileIdentityProvider
 from hitl.jira import FakeJira
 from hitl.logging import setup_logging
 from hitl.policy import Action
+from hitl.server import serve
 
 LEVELS = ("junior", "senior", "lead")
 
@@ -123,6 +125,18 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("config", help="print the resolved configuration")
     c.add_argument("--json", action="store_true")
 
+    h = sub.add_parser("health", help="check that this install can do its job")
+    h.add_argument("--json", action="store_true")
+    h.add_argument(
+        "--deep",
+        action="store_true",
+        help="also verify the audit chain and count stuck approvals",
+    )
+
+    sv = sub.add_parser("serve", help="serve /health and /metrics until SIGTERM")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8080)
+
     args = p.parse_args(argv)
 
     try:
@@ -169,6 +183,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{args.users_cmd}: {args.user_id}")
         return 0
 
+    if args.cmd == "health":
+        report = check_health(cfg, deep=args.deep)
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(f"status: {report.status}")
+            for check in report.checks:
+                print(f"  {check.status:9} {check.name}: {check.detail}")
+        return 0 if report.ok else 1
+
+    if args.cmd == "serve":
+        return serve(cfg, host=args.host, port=args.port)
+
     if args.cmd == "verify":
         problems = verify_chain(cfg.audit_dir)
         if problems:
@@ -181,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "audit":
         found = []
-        for f in sorted((home / "audit").glob("*.jsonl")):
+        for f in sorted(cfg.audit_dir.glob("*.jsonl")):
             for line in f.read_text(encoding="utf-8").splitlines():
                 if json.loads(line)["request_id"] == args.request_id:
                     found.append(line)
@@ -192,37 +219,53 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     jira = _jira(args.seed)
-    cfg_id = args.request_id if args.cmd != "submit" else new_request_id()
-    cfg = {"configurable": {"thread_id": cfg_id}}
+    request_id = args.request_id if args.cmd != "submit" else new_request_id()
+    thread = {"configurable": {"thread_id": request_id}}
 
-    with checkpointer_for(db) as cp:
-        app = build_graph(jira, cp, FileIdentityProvider(identities_path))
-        if args.cmd == "submit":
-            try:
-                action = parse_action(args.request)
-            except ValueError as exc:
-                print(str(exc))
-                return 2
-            state = app.invoke(
-                {"request": args.request, "request_id": cfg_id, "action": asdict(action)}, cfg
-            )
-        else:
-            decision = "approve" if args.cmd == "approve" else "deny"
-            state = app.invoke(
-                Command(resume={"decision": decision, "human_id": args.human_id}), cfg
-            )
+    if args.cmd == "submit":
+        # Parse before opening anything: an unparseable request must not
+        # leave a checkpoint file behind.
+        try:
+            action = parse_action(args.request)
+        except ValueError as exc:
+            print(str(exc))
+            return 2
 
-    _emit(state, home)
+    # Running the graph and writing its audit records is one indivisible
+    # step. A SIGTERM landing between them would leave an executed action
+    # with no trail, which is the one outcome this system exists to prevent.
+    with defer_signals():
+        with checkpointer_for(db) as cp:
+            app = build_graph(jira, cp, FileIdentityProvider(identities_path))
+            if args.cmd == "submit":
+                state = app.invoke(
+                    {
+                        "request": args.request,
+                        "request_id": request_id,
+                        "action": asdict(action),
+                    },
+                    thread,
+                )
+            else:
+                decision = "approve" if args.cmd == "approve" else "deny"
+                state = app.invoke(
+                    Command(
+                        resume={"decision": decision, "human_id": args.human_id}
+                    ),
+                    thread,
+                )
+
+        _emit(state, home)
 
     if "__interrupt__" in state:
         print("APPROVAL REQUIRED")
-        print(f"  request_id {cfg_id}")
-        print(f"  approve with: hitl approve {cfg_id} --as <your-id>")
+        print(f"  request_id {request_id}")
+        print(f"  approve with: hitl approve {request_id} --as <your-id>")
         return 0
 
     if state.get("refusal"):
         print(f"REJECTED: {state['refusal']}")
-        print(f"  request_id {cfg_id} was denied and is closed")
+        print(f"  request_id {request_id} was denied and is closed")
         return 3
 
     print(f"stage: {state.get('stage')}")

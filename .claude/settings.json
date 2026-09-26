@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m pytest tests/test_jira_resilience.py -q)",
+      "Bash(python3 -m pytest tests/test_jira_resilience.py -q --durations=8)",
+      "Bash(python3 -m pytest -q --durations=5)",
+      "Bash(python3 -c \"import tomllib; print\\('tomllib available'\\)\")",
+      "Bash(HITL_ATTEMPTS=99 python3 -m pytest -q)",
+      "Bash(python3 -m pytest tests/test_config.py -q)",
+      "Bash(python3 -m pytest tests/test_cli_config.py -q)",
+      "Bash(grep -q '^\\\\.env$' .gitignore)"
+    ]
+  }
+}

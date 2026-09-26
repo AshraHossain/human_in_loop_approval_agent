@@ -69,6 +69,14 @@ class Config:
     jira_cloud_id: str | None = None
     jira_project_key: str = "KAN"
 
+    def __post_init__(self) -> None:
+        # `load_config` coerces, but nothing stops a caller from writing
+        # `Config(home="/srv/hitl")`, and a str reaches the `/` operator in
+        # the properties below as a TypeError from three frames away. Coerce
+        # here so every construction path lands in the same shape.
+        if not isinstance(self.home, Path):
+            object.__setattr__(self, "home", Path(self.home))
+
     # Paths are derived, never configured separately: three settings that
     # must agree is three chances for them to disagree.
     @property
