@@ -4,78 +4,161 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Three independent implementations of the *same* Human-in-the-Loop (HITL) approval
-pattern, one per LangChain/LangGraph architecture, so they can be compared
-side by side. Every version implements the same four-stage contract:
+A LangGraph agent that gates Jira writes behind a **durable** human approval step.
+When a request clears policy it runs; when it doesn't, `approval_gate` calls
+`interrupt()`, LangGraph persists the whole state to a SQLite checkpointer, and the
+process **exits**. A later `approve` resumes from that checkpoint in a brand new
+process.
 
-1. **Detect** — scan input for `UNCERTAINTY_MARKERS` (`maybe`, `not sure`, `unclear`, `unknown`, `ambiguous`)
-2. **Pause** — emit `HUMAN_APPROVAL_REQUIRED` / stage `awaiting_human` and stop
-3. **Resume** — re-enter with `human_input` in the payload
-4. **Audit** — every stage transition returns a `make_audit(...)` dict
+```
+submit → assess ─┬─(auto)─────────────────→ execute → END
+                 └─(gate)→ approval_gate ──┬─(approve)→ execute → END
+                            [interrupt()]  └─(deny)────→ denied  → END
+```
 
-| Version | Pause mechanism | Entry point |
-|---|---|---|
-| `agent_executor_version/` | LLM calls `hitl_check` tool, returns status string | `main.py:run()` |
-| `langgraph_version/` | Conditional edge routes `awaiting_human` → `END` | `graph.py:app` |
-| `runnable_pipeline_version/` | `RunnableLambda` returns status dict; caller re-invokes `resume_with_human` | `pipeline.py:hitl_pipeline` |
+A full cycle is **three separate process invocations** (`submit`, `approve`, `audit`).
+Any test or change that assumes one long-lived process has missed the point —
+`tests/test_graph.py::test_interrupt_survives_a_new_checkpointer_instance` is the
+proof, and it works by building a *fresh* `SqliteSaver` over the same file.
 
-`audit.py` is deliberately duplicated in all three — **and the signatures differ**:
-`agent_executor_version/audit.py` takes `input_summary` + `actions_taken`, the other
-two do not. Changing the audit schema means editing three files, not one.
+## The invariant
 
-## Layout gotcha
+> Confidence may only ever **escalate** to a gate. It can never clear one that
+> policy requires.
 
-The tree is nested: the actual code lives at
-`human_in_loop_approval_agent/human_in_loop_approval_agent/`. The outer directory
-holds only `scaffold_hitl_repo.py`.
+Risk tier comes from the *action* (`transition → Done` is high, always), never from
+how confidently the request was worded. `AMBIGUITY_MARKERS` in `policy.py` is a
+confidence signal only — never a tier input. `decide()` is the single place this is
+expressed, and `tests/test_policy.py::test_high_confidence_cannot_clear_a_policy_gate`
+is the load-bearing test. If a change makes that test pass for the wrong reason, the
+project has lost its purpose.
 
-## scaffold_hitl_repo.py is destructive
+Unknown action kinds and unknown tiers **fail closed** to `high` / `LEAD`
+(`risk_tier`, `level_for_tier`).
 
-`python scaffold_hitl_repo.py` writes every file in its `FILES` dict with `"w"` —
-it **overwrites hand-edited source without warning**. It is a one-shot bootstrap,
-not a sync tool. Do not re-run it. Edit files directly; if the scaffold must be
-kept current, update its `FILES` dict to match the real files.
+## Layout
 
-It has already been run twice with different `FILES` contents, which left
-artifacts still present in the tree:
+```
+src/hitl/        audit policy jira graph cli config identity
+                 resilience logging siem notifiers health server backup
+tests/           21 test modules, 431 tests
+docs/superpowers/specs/   design contract
+docs/superpowers/plans/   implementation plan (embeds source — see note below)
+archive/         two retired variants, still runnable
+diagrams/        *.mmd
+config.example.toml
+```
 
-- `agent_executor_version/main.py` — contains the *text of the scaffold script*, not the agent; ends with `print('agent executor placeholder')`
-- `langgraph_version/pyproject.toml`, `runnable_pipeline_version/pyproject.toml` — `[project]` table duplicated
-- `README.md` — heading duplicated, unterminated ``` fence
-- `diagrams/*.mmd` — stray trailing `flowchart TD` / `sequenceDiagram` line
+Code is at `src/hitl/` with `pythonpath = ["src"]` in `[tool.pytest.ini_options]`,
+so imports are absolute (`from hitl.audit import ...`), not relative.
 
-Assume any file may be in this state; read before editing.
+## Non-obvious constraints
 
-## Known breakage in the generated sources
+**Retry is split by what a failure proves** (`resilience.py`). None of Jira's
+mutations are idempotent — a retried `create_issue` is two issues. So reads retry on
+anything transient, but mutations retry *only* on failures proving the request never
+reached Jira (refused connection, DNS failure, explicit "not processed"). A timeout is
+ambiguous and is **never** retried; the caller is told the outcome is unknown.
+`JiraUnavailableError` means nothing was applied; a plain `JiraError` means Jira
+considered the action and refused. Do not collapse them.
 
-- `runnable_pipeline_version/pipeline.py` imports `RunnableLambda, RunnablePassthrough` from `langchain.schema` — they live in `langchain_core.runnables`
-- `agent_executor_version/main.py` passes a `ChatOpenAI` directly as `AgentExecutor.from_agent_and_tools(agent=...)`, which expects an agent, not an LLM; `langchain.chat_models.ChatOpenAI` is also the deprecated import path (use `langchain_openai`)
-- Modules use relative imports (`from .audit import ...`) but the README says to run them as scripts (`uv run main.py`) — that raises `ImportError`. Either run as a module from the parent (`uv run -m agent_executor_version.main`) or switch to absolute imports.
-- No `uv.lock`, no `tests/` in any subproject
+The circuit breaker counts **availability** failures only. Jira answering "no
+transition to Done" is Jira working; tripping a breaker on it would take the system
+down over one misconfigured workflow.
+
+**One `request_id` per request**, minted once at submit by `new_request_id()` and
+threaded through every stage. Regenerating it per record is what made earlier
+implementations' trails impossible to correlate. `make_audit` is keyword-only on
+purpose.
+
+**Audit writes are hash-chained** (`hash_record`, `last_hash`, `GENESIS_HASH`).
+`_canonical` fixes key order — changing the serialization changes every hash and
+breaks `hitl verify`. The audit schema is a fixed key set asserted by
+`test_audit.py::test_schema_keys_exact`.
+
+**Graph run + audit write is one indivisible step.** `cli.py` wraps both in
+`defer_signals()`; a SIGTERM landing between them would leave an executed action with
+no trail, the one outcome this system exists to prevent.
+
+**Nothing is pickled into the checkpoint.** The `Action` dataclass is stored as a dict
+(`asdict`) — `test_cli.py::test_checkpoint_holds_no_pickled_classes` enforces it.
+
+**`approve --as <id>` is self-asserted identity.** No authentication. Approvers come
+from a JSON identities file re-read on every call, so revocation is immediate
+(`FileIdentityProvider`). A fresh install has no approvers and therefore approves
+nothing.
+
+**No LLM dependency and no API key.** Confidence is a rule-based estimate. Do not add
+a model call without being asked.
 
 ## Commands
 
-Each subproject is its own uv workspace — run from inside the subdirectory:
-
 ```bash
-cd human_in_loop_approval_agent/langgraph_version
 uv sync
-uv run python -c "from graph import app; print(app.invoke({'input': 'maybe do X'}))"
+uv run pytest -q                              # 431 tests, ~10s
+uv run python -m hitl.cli --help
+uv run python -m hitl.cli config              # resolved config, secrets masked
+uv run python -m hitl.cli health --json
 ```
 
-Repo-wide tooling comes from the parent cockpit repo
+CLI surface: `submit` `approve` `deny` `audit` `verify` `users {add,rm,list}` `config`
+`health` `serve` `backup` `restore` `archive`.
+
+Exit codes are meaningful: `0` ok (including "approval required"), `1` health/verify
+failure, `2` unparseable request or bad config, `3` denied, `4` deferred — nothing was
+applied, safe to resubmit.
+
+Config precedence, highest first: CLI flag → `HITL_*` env var → `.env` →
+`[profiles.<name>]` → `[default]` → built-in. Secrets are refused in the TOML file;
+`test_cli_config.py` asserts that. See `config.example.toml`.
+
+Repo-wide tooling lives in the parent cockpit
 (`/Users/ashrafhossain/AI_Engineering_Cockpit`), run from there:
 
 ```bash
-make lint        # uv run ruff check --config config/ruff.toml .
-make format      # black + ruff --fix across root and projects/*
-make test-all    # scripts/run-tests.sh — iterates projects/*/pyproject.toml
-make precommit   # pre-commit run --all-files -c config/.pre-commit-config.yaml
+make lint format test-all precommit
 ```
 
-`scripts/run-tests.sh` skips any `projects/*/` directory without a top-level
-`pyproject.toml`. This project has none (only per-version ones), so it is
-currently skipped by `make test-all`. Add a root `pyproject.toml` with
-`[tool.pytest.ini_options]` to opt in, as `projects/18-rag-citation-agent` does.
+This project **is** picked up by `make test-all` — it has a root `pyproject.toml`
+with `[tool.pytest.ini_options]`, which is the condition `scripts/run-tests.sh`
+checks.
 
-Root Python is 3.11; the subprojects declare `requires-python = ">=3.10"`.
+## `archive/` — read as history
+
+Started as three implementations of the same pattern to compare architectures. The
+comparison stopped being meaningful: `AgentExecutor` left `langchain.agents` in
+langchain 1.0, and on 1.x `create_agent` is LangGraph underneath, so the contrast no
+longer exists. `archive/agent_executor_version` needs `langchain-classic` to run at
+all. Both still pass offline self-checks:
+
+```bash
+uv run --project archive/agent_executor_version \
+  python -m archive.agent_executor_version.main --self-check
+uv run --project archive/runnable_pipeline_version \
+  python -m archive.runnable_pipeline_version.pipeline --self-check
+```
+
+Do not "fix" the archived variants or re-unify their `audit.py` signatures. They are
+frozen.
+
+> The `scaffold_hitl_repo.py` that generated this tree with `"w"` writes — overwriting
+> hand-edited source — was removed on 2026-09-18 and its damage repaired. Do not
+> recreate it. If regeneration is ever needed, write a tool that refuses to overwrite.
+
+## Current status
+
+Jira is **not bound**. `getAccessibleAtlassianResources()` returns `[]` — no
+Atlassian site is reachable, so there is no `cloudId`. Everything is built against the
+`JiraPort` protocol with an in-memory `FakeJira`, so the graph is complete and tested
+without a network. Binding the live API is one class (`RovoJira`), and
+`from_config` refuses to build without a `jira_cloud_id`.
+
+## graphify note
+
+`graphify-out/` holds a knowledge graph of this repo (1056 nodes, 39 communities).
+The plan doc at `docs/superpowers/plans/` embeds the full source of `src/hitl/*.py`,
+so ~19 symbols exist twice in the graph — once under the doc's node stem, once under
+`src_hitl_*` from AST extraction. They are deliberately linked with `references`
+edges rather than merged, because a doc's description of `make_audit` and the real
+function are different objects. Re-running `/graphify --update` reproduces the split;
+that is expected, not a bug.
