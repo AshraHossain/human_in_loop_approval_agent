@@ -1,0 +1,107 @@
+{
+  "CLAUDE.md": {
+    "mtime": 1789771198.2776752,
+    "ast_hash": "e4f6228e857cafbbe90592da8401c5c4",
+    "semantic_hash": "e4f6228e857cafbbe90592da8401c5c4"
+  },
+  "archive/agent_executor_version/audit.py": {
+    "mtime": 1789770934.5560894,
+    "ast_hash": "8ddd7f4f9d731bf6a6997f7114228b77",
+    "semantic_hash": ""
+  },
+  "archive/agent_executor_version/hitl_tool.py": {
+    "mtime": 1789770952.340778,
+    "ast_hash": "4b0b7f61c8df5ee261dfaa4dc3811c02",
+    "semantic_hash": ""
+  },
+  "archive/agent_executor_version/main.py": {
+    "mtime": 1789778069.7513497,
+    "ast_hash": "ea8bcf197cfdc8c7c0478ce770216853",
+    "semantic_hash": ""
+  },
+  "archive/runnable_pipeline_version/audit.py": {
+    "mtime": 1789770535.6995575,
+    "ast_hash": "0927d4235a066fb6a496a32f363d3af1",
+    "semantic_hash": ""
+  },
+  "archive/runnable_pipeline_version/pipeline.py": {
+    "mtime": 1789778515.2361784,
+    "ast_hash": "f6ecbd0864814ff7ebf3bbff255e0fdc",
+    "semantic_hash": ""
+  },
+  "src/hitl/__init__.py": {
+    "mtime": 1789786050.761467,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "src/hitl/audit.py": {
+    "mtime": 1789875281.0785367,
+    "ast_hash": "6516141ce43acf285ba9a20e1a73657c",
+    "semantic_hash": ""
+  },
+  "src/hitl/cli.py": {
+    "mtime": 1789875281.112447,
+    "ast_hash": "12b94e67a2a1818c1db4e4e360caa6c4",
+    "semantic_hash": ""
+  },
+  "src/hitl/graph.py": {
+    "mtime": 1789875221.6724987,
+    "ast_hash": "ba2b4a5b5347e411874bebeca7f91995",
+    "semantic_hash": ""
+  },
+  "src/hitl/jira.py": {
+    "mtime": 1790041734.5659168,
+    "ast_hash": "99f1ccb4e5157e119f512e0b45e925d5",
+    "semantic_hash": ""
+  },
+  "src/hitl/policy.py": {
+    "mtime": 1789875074.2272477,
+    "ast_hash": "aa893d771ab22e7fe9d8ec730924ebe8",
+    "semantic_hash": ""
+  },
+  "tests/__init__.py": {
+    "mtime": 1789786050.761546,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "tests/test_audit.py": {
+    "mtime": 1789875290.7264855,
+    "ast_hash": "55451f31128910e9616cdc5b20355ca1",
+    "semantic_hash": ""
+  },
+  "tests/test_cli.py": {
+    "mtime": 1789875281.1126614,
+    "ast_hash": "1ab7afa7b748a8d9d0de68b9cb10b522",
+    "semantic_hash": ""
+  },
+  "tests/test_graph.py": {
+    "mtime": 1789875245.7175596,
+    "ast_hash": "0ae473fb9e4453b1f56dc7f77e80a138",
+    "semantic_hash": ""
+  },
+  "tests/test_jira.py": {
+    "mtime": 1789875049.8100555,
+    "ast_hash": "7cb2a84dc11f746fc514425b555602fd",
+    "semantic_hash": ""
+  },
+  "tests/test_policy.py": {
+    "mtime": 1789875031.9249074,
+    "ast_hash": "146a97a008719a57d6ede59a91ad50e5",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1789786127.0993295,
+    "ast_hash": "668ed438ca0e04042856b4b5f4de9292",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-09-18-hitl-approval-agent.md": {
+    "mtime": 1789785741.5223463,
+    "ast_hash": "ae40d8263a33f798ad2e68c222840dc7",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-09-18-hitl-approval-agent-design.md": {
+    "mtime": 1789779179.665362,
+    "ast_hash": "7368bd1456d488670a166c29afd4d702",
+    "semantic_hash": ""
+  }
+}
